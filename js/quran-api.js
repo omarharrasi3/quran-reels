@@ -44,7 +44,8 @@ export async function getVerses(surah, from, to) {
   );
   const [ar, en] = data;
   return ar.ayahs.map((a, i) => {
-    let arabic = a.text.replace(/﻿/g, '').trim();
+    // Drop the BOM and the mushaf page markers ۞ (rub el hizb) and ۩ (sajdah sign), which render as stray symbols.
+    let arabic = a.text.replace(/[﻿۞۩]/g, '').replace(/\s+/g, ' ').trim();
     // Ayah 1 of every surah except Al-Fatiha (1) and At-Tawbah (9) carries the basmala prefix in this edition,
     // but the recitation audio for that ayah does not, so strip it from the text.
     if (a.numberInSurah === 1 && surah !== 1 && surah !== 9) {

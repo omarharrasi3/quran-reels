@@ -16,7 +16,8 @@ const FADE = 0.35;
 const layoutCache = new WeakMap();
 
 function wrap(ctx, text, maxW) {
-  const words = text.split(/\s+/).filter(Boolean);
+  // Split on ordinary spaces only, so a no-break space keeps the ayah marker with its last word.
+  const words = text.split(/[ \t\n]+/).filter(Boolean);
   const lines = [];
   let line = '';
   for (const w of words) {
@@ -45,7 +46,7 @@ function layout(ctx, seg, opts) {
 
   const maxW = W - TEXT_X_MARGIN * 2;
   const areaH = TEXT_BOTTOM - TEXT_TOP;
-  const arText = seg.ayahNo ? `${seg.arabic} ۝${toArabicDigits(seg.ayahNo)}` : seg.arabic;
+  const arText = seg.ayahNo ? `${seg.arabic} ۝${toArabicDigits(seg.ayahNo)}` : seg.arabic;
   const scale = opts.arScale || 1;
   let fit = null;
 
@@ -97,9 +98,24 @@ function layout(ctx, seg, opts) {
   return pages;
 }
 
-function drawBackground(ctx, video, t, bgStyle) {
+// Still photo with a slow "Ken Burns" zoom and pan across the whole reel.
+function drawPhoto(ctx, img, t, duration) {
+  const p = Math.min(1, Math.max(0, t / Math.max(1, duration)));
+  const ease = p * p * (3 - 2 * p);
+  const cover = Math.max(W / img.width, H / img.height);
+  const s = cover * (1.06 + 0.1 * ease);
+  const dw = img.width * s, dh = img.height * s;
+  const exX = dw - W, exY = dh - H;
+  const x = -exX / 2 + (ease - 0.5) * exX * 0.7;
+  const y = -exY / 2 - (ease - 0.5) * exY * 0.3;
+  ctx.drawImage(img, x, y, dw, dh);
+}
+
+function drawBackground(ctx, video, t, bgStyle, image, duration) {
   if (bgStyle) {
     bgStyle.draw(ctx, t, W, H);
+  } else if (image) {
+    drawPhoto(ctx, image, t, duration);
   } else if (video && video.readyState >= 2 && video.videoWidth) {
     const s = Math.max(W / video.videoWidth, H / video.videoHeight);
     const dw = video.videoWidth * s;
@@ -125,7 +141,7 @@ function drawBackground(ctx, video, t, bgStyle) {
 export function drawFrame(ctx, reel, t, opts) {
   ctx.save();
   ctx.clearRect(0, 0, W, H);
-  drawBackground(ctx, opts.video, t, opts.bgStyle);
+  drawBackground(ctx, opts.video, t, opts.bgStyle, opts.image, reel ? reel.duration : 30);
 
   ctx.fillStyle = `rgba(0,0,0,${opts.overlay})`;
   ctx.fillRect(0, 0, W, H);

@@ -100,6 +100,46 @@ export async function searchCommons(query) {
     .slice(0, 18);
 }
 
+/** High-quality photos (Commons "Quality images"), sized ~1920px tall so they stay sharp in a 9:16 reel. */
+export async function searchCommonsPhotos(query) {
+  const params = new URLSearchParams({
+    action: 'query', format: 'json', origin: '*',
+    generator: 'search', gsrnamespace: '6', gsrlimit: '40',
+    gsrsearch: `${query} incategory:Quality_images filetype:bitmap`,
+    prop: 'imageinfo', iiprop: 'url|size|extmetadata',
+    iiextmetadatafilter: 'LicenseShortName|Artist', iiurlheight: '1920',
+  });
+  const res = await fetch(`https://commons.wikimedia.org/w/api.php?${params}`);
+  if (!res.ok) throw new Error(`Search failed (${res.status}).`);
+  const data = await res.json();
+  return Object.values(data.query?.pages || {})
+    .sort((a, b) => a.index - b.index)
+    .map((p) => {
+      const i = p.imageinfo?.[0];
+      if (!i || i.height < 1300 || !i.thumburl) return null;
+      const m = i.extmetadata || {};
+      return {
+        id: p.pageid,
+        title: p.title.replace(/^File:/, '').replace(/\.[a-z0-9]+$/i, ''),
+        thumb: i.thumburl.replace(/\/\d+px-/, '/330px-'),
+        full: i.thumburl,
+        portrait: i.height > i.width,
+        author: stripHtml(m.Artist?.value) || 'Unknown author',
+        license: stripHtml(m.LicenseShortName?.value) || 'see Commons page',
+        pageUrl: i.descriptionurl,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Number(b.portrait) - Number(a.portrait))
+    .slice(0, 18);
+}
+
+export async function loadImageUrl(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Could not download the photo (${res.status}).`);
+  return createImageBitmap(await res.blob());
+}
+
 /** Download any CORS-enabled video URL into a blob-backed <video>. */
 export async function loadVideoUrl(url, onProgress = () => {}) {
   const res = await fetch(url);

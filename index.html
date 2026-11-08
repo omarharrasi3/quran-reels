@@ -38,7 +38,8 @@
         <h2><span class="step">2</span> Background</h2>
         <div class="tabs" role="tablist">
           <button role="tab" data-tab="animated" aria-selected="true">Animated</button>
-          <button role="tab" data-tab="free">Free clips</button>
+          <button role="tab" data-tab="photos">Photos</button>
+          <button role="tab" data-tab="free">Clips</button>
           <button role="tab" data-tab="pexels">Pexels</button>
           <button role="tab" data-tab="upload">Upload</button>
         </div>
@@ -46,6 +47,16 @@
         <div class="tabpanel" data-panel="animated">
           <p class="hint">Made by the page itself, so no download is needed. They work for any length and export fastest.</p>
           <div class="grid styles" id="styleGrid"></div>
+        </div>
+
+        <div class="tabpanel" data-panel="photos" hidden>
+          <p class="hint">High-quality nature photos (Wikimedia Commons). They move with a slow zoom. No account needed.</p>
+          <div class="row">
+            <input id="photoQuery" type="search" placeholder="e.g. sunset sea, mountains" value="sunset sea" />
+            <button id="photoSearch">Search</button>
+          </div>
+          <div class="chips" id="photoChips"></div>
+          <div class="grid" id="photoResults"></div>
         </div>
 
         <div class="tabpanel" data-panel="free" hidden>

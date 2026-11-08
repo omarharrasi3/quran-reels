@@ -4,6 +4,7 @@ import { drawFrame } from './renderer.js';
 import { webCodecsSupport, exportWebCodecs, exportRealtime } from './exporter.js';
 import {
   getPexelsKey, setPexelsKey, searchPexels, loadPexelsVideo, videoFromBlob, searchCommons, loadVideoUrl,
+  searchCommonsPhotos, loadImageUrl,
 } from './backgrounds.js';
 import { STYLES, getStyle, thumbnail } from './generated.js';
 
@@ -12,7 +13,8 @@ const els = Object.fromEntries(
   ['surah', 'from', 'to', 'reciter', 'basmala', 'load', 'loadStatus', 'upload', 'clearBg', 'pexelsKey', 'pexelsQuery',
    'pexelsSearch', 'pexelsResults', 'chips', 'bgStatus', 'overlay', 'showTranslation', 'showHeader', 'showReciter',
    'handle', 'arScale', 'export', 'cancel', 'progress', 'exportStatus', 'download', 'canvas', 'play', 'seek', 'time',
-   'durationNote', 'styleGrid', 'freeQuery', 'freeSearch', 'freeChips', 'freeResults', 'bgCredit'].map((id) => [id, $(id)])
+   'durationNote', 'styleGrid', 'freeQuery', 'freeSearch', 'freeChips', 'freeResults', 'bgCredit',
+   'photoQuery', 'photoSearch', 'photoChips', 'photoResults'].map((id) => [id, $(id)])
 );
 const ctx = els.canvas.getContext('2d');
 
@@ -21,7 +23,8 @@ const state = {
   reel: null,
   meta: null, // { surahNameAr, surahNameEn, reciterName, slug }
   video: null,
-  bgStyle: getStyle('night'), // animated background; null when a video/gradient is used
+  bgStyle: getStyle('night'), // animated background; null when a photo/video/gradient is used
+  image: null, // still photo (ImageBitmap) shown with a slow zoom
   playing: false,
   audioCtx: null,
   source: null,
@@ -38,7 +41,8 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
 
 function renderOpts() {
   return {
-    video: state.bgStyle ? null : state.video,
+    video: state.bgStyle || state.image ? null : state.video,
+    image: state.bgStyle ? null : state.image,
     bgStyle: state.bgStyle,
     overlay: Number(els.overlay.value),
     showTranslation: els.showTranslation.checked,
@@ -170,7 +174,7 @@ function play() {
   state.source = src;
   state.startedAt = state.audioCtx.currentTime - state.pausedAt;
   state.playing = true;
-  if (state.video && !state.bgStyle) {
+  if (state.video && !state.bgStyle && !state.image) {
     state.video.currentTime = state.pausedAt % (state.video.duration || 1);
     state.video.play().catch(() => {});
   }
@@ -235,6 +239,7 @@ function setCredit(text) {
 function useStyle(style, btn) {
   if (state.video) state.video.pause();
   state.bgStyle = style;
+  state.image = null;
   els.overlay.value = style.overlay;
   markSelected(btn);
   setCredit('');
@@ -259,6 +264,7 @@ async function useVideo(v, btn) {
   if (state.video) { state.video.pause(); URL.revokeObjectURL(state.video.src); }
   state.video = v;
   state.bgStyle = null;
+  state.image = null;
   els.overlay.value = 0.45;
   markSelected(btn);
   if (state.playing) {
@@ -277,6 +283,54 @@ function resultButton(it, badge) {
   span.textContent = badge;
   b.append(img, span);
   return b;
+}
+
+// ---- photos
+function useImage(img, btn) {
+  if (state.video) state.video.pause();
+  state.image = img;
+  state.bgStyle = null;
+  els.overlay.value = 0.35;
+  markSelected(btn);
+}
+
+['sunset sea', 'sunset desert', 'sunset mountains', 'sunset clouds', 'sunrise', 'golden hour', 'sunset lake', 'forest', 'waterfall', 'starry sky'].forEach((q) => {
+  const b = document.createElement('button');
+  b.textContent = q;
+  b.onclick = () => { els.photoQuery.value = q; doPhotoSearch(); };
+  els.photoChips.append(b);
+});
+els.photoSearch.onclick = () => doPhotoSearch();
+els.photoQuery.onkeydown = (e) => { if (e.key === 'Enter') doPhotoSearch(); };
+document.querySelector('[data-tab=photos]').addEventListener('click', () => {
+  if (!els.photoResults.children.length) doPhotoSearch();
+});
+
+async function doPhotoSearch() {
+  setStatus(els.bgStatus, 'Searching photos…');
+  els.photoResults.innerHTML = '';
+  try {
+    const items = await searchCommonsPhotos(els.photoQuery.value.trim() || 'sunset');
+    if (!items.length) { setStatus(els.bgStatus, 'No photos found. Try another word, like “sunset” or “sea”.'); return; }
+    setStatus(els.bgStatus, 'Tap a photo to use it.');
+    for (const it of items) {
+      const b = resultButton(it, it.portrait ? 'Tall' : 'Wide');
+      b.title = `${it.title}, by ${it.author} (${it.license})`;
+      b.onclick = async () => {
+        setStatus(els.bgStatus, 'Downloading photo…');
+        try {
+          useImage(await loadImageUrl(it.full), b);
+          setStatus(els.bgStatus, `Using “${it.title}”.`);
+          setCredit(`Background: “${it.title}” by ${it.author}, ${it.license}, via Wikimedia Commons. Please add this credit to your Instagram caption.`);
+        } catch (e) {
+          setStatus(els.bgStatus, e.message, true);
+        }
+      };
+      els.photoResults.append(b);
+    }
+  } catch (e) {
+    setStatus(els.bgStatus, `Couldn't search right now: ${e.message}`, true);
+  }
 }
 
 ['clouds timelapse', 'ocean waves', 'forest', 'waterfall', 'rain', 'mountains', 'sunset', 'stars night', 'desert', 'river'].forEach((q) => {
@@ -333,6 +387,7 @@ els.clearBg.onclick = () => {
   if (state.video) { state.video.pause(); URL.revokeObjectURL(state.video.src); }
   state.video = null;
   state.bgStyle = null;
+  state.image = null;
   els.overlay.value = 0.2;
   markSelected(null);
   setCredit('');

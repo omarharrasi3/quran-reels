@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Quran Reels Maker</title>
+  <meta name="description" content="Make Quran recitation reels for Instagram right in your browser." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Amiri+Quran&family=Amiri:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.js"></script>
+</head>
+<body>
+  <header class="top">
+    <h1>Quran Reels Maker</h1>
+    <p>Pick the verses, a reciter and a background, then download a 1080×1920 MP4 ready for Instagram.</p>
+  </header>
+
+  <main class="layout">
+    <section class="panel">
+      <div class="card">
+        <h2><span class="step">1</span> Verses</h2>
+        <label>Surah
+          <select id="surah"><option>Loading…</option></select>
+        </label>
+        <div class="row">
+          <label>From ayah <input id="from" type="number" min="1" value="1" /></label>
+          <label>To ayah <input id="to" type="number" min="1" value="7" /></label>
+        </div>
+        <label>Reciter <select id="reciter"></select></label>
+        <label class="check"><input id="basmala" type="checkbox" checked /> Start with Bismillah</label>
+        <button id="load" class="primary">Load verses</button>
+        <p id="loadStatus" class="status"></p>
+      </div>
+
+      <div class="card">
+        <h2><span class="step">2</span> Background</h2>
+        <div class="row">
+          <label class="file-btn">Upload clip
+            <input id="upload" type="file" accept="video/*" hidden />
+          </label>
+          <button id="clearBg" class="ghost">Use plain gradient</button>
+        </div>
+        <details id="pexelsBox">
+          <summary>Search free nature clips (Pexels)</summary>
+          <p class="hint">Get a free API key at <a href="https://www.pexels.com/api/" target="_blank" rel="noopener">pexels.com/api</a>. It is saved only in this browser.</p>
+          <label>Pexels API key <input id="pexelsKey" type="password" autocomplete="off" placeholder="Paste your key" /></label>
+          <div class="row">
+            <input id="pexelsQuery" type="search" placeholder="e.g. clouds, ocean, forest" value="clouds sky" />
+            <button id="pexelsSearch">Search</button>
+          </div>
+          <div class="chips" id="chips"></div>
+          <div class="grid" id="pexelsResults"></div>
+        </details>
+        <p id="bgStatus" class="status"></p>
+        <label>Darken background <input id="overlay" type="range" min="0" max="0.85" step="0.05" value="0.45" /></label>
+      </div>
+
+      <div class="card">
+        <h2><span class="step">3</span> Text</h2>
+        <label class="check"><input id="showTranslation" type="checkbox" checked /> English translation (Sahih International)</label>
+        <label class="check"><input id="showHeader" type="checkbox" checked /> Surah name at the top</label>
+        <label class="check"><input id="showReciter" type="checkbox" checked /> Reciter name at the bottom</label>
+        <label>Your handle (optional) <input id="handle" type="text" placeholder="@youraccount" /></label>
+        <label>Arabic text size <input id="arScale" type="range" min="0.7" max="1.2" step="0.05" value="1" /></label>
+      </div>
+
+      <div class="card">
+        <h2><span class="step">4</span> Export</h2>
+        <button id="export" class="primary" disabled>Create MP4</button>
+        <button id="cancel" class="ghost" hidden>Cancel</button>
+        <progress id="progress" max="1" value="0" hidden></progress>
+        <p id="exportStatus" class="status"></p>
+        <a id="download" class="download" hidden download="quran-reel.mp4">Download video</a>
+      </div>
+    </section>
+
+    <section class="preview">
+      <div class="phone">
+        <canvas id="canvas" width="1080" height="1920" aria-label="Reel preview"></canvas>
+        <button id="play" class="play" aria-label="Play preview" disabled>▶</button>
+      </div>
+      <div class="scrub">
+        <input id="seek" type="range" min="0" max="1" step="0.01" value="0" disabled />
+        <span id="time">0:00 / 0:00</span>
+      </div>
+      <p id="durationNote" class="hint"></p>
+    </section>
+  </main>
+
+  <footer class="foot">Text: Tanzil (Uthmani) & Sahih International via alquran.cloud · Audio: everyayah.com · Clips: Pexels</footer>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

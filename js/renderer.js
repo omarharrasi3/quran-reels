@@ -97,8 +97,10 @@ function layout(ctx, seg, opts) {
   return pages;
 }
 
-function drawBackground(ctx, video, t) {
-  if (video && video.readyState >= 2 && video.videoWidth) {
+function drawBackground(ctx, video, t, bgStyle) {
+  if (bgStyle) {
+    bgStyle.draw(ctx, t, W, H);
+  } else if (video && video.readyState >= 2 && video.videoWidth) {
     const s = Math.max(W / video.videoWidth, H / video.videoHeight);
     const dw = video.videoWidth * s;
     const dh = video.videoHeight * s;
@@ -118,12 +120,12 @@ function drawBackground(ctx, video, t) {
 }
 
 /**
- * opts: { video, overlay (0..1), showTranslation, showHeader, surahNameAr, surahNameEn, reciterName, handle, arScale }
+ * opts: { video, bgStyle (from generated.js; wins over video), overlay (0..1), showTranslation, showHeader, surahNameAr, surahNameEn, reciterName, handle, arScale }
  */
 export function drawFrame(ctx, reel, t, opts) {
   ctx.save();
   ctx.clearRect(0, 0, W, H);
-  drawBackground(ctx, opts.video, t);
+  drawBackground(ctx, opts.video, t, opts.bgStyle);
 
   ctx.fillStyle = `rgba(0,0,0,${opts.overlay})`;
   ctx.fillRect(0, 0, W, H);

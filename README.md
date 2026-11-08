@@ -4,10 +4,11 @@ A web page that makes Quran recitation reels (1080×1920 MP4) for Instagram, ent
 
 ## How to use it
 1. **Verses:** pick a surah, the ayah range and a reciter, then press **Load verses**.
-2. **Background:** you have three options:
-   - Upload a nature clip.
-   - Search Pexels. This needs a free API key from https://www.pexels.com/api/, which is saved only in your browser.
-   - Keep the plain gradient.
+2. **Background:** choose one of four tabs:
+   - **Animated:** 8 backgrounds drawn by the page itself (night sky, clouds, ocean sunset, aurora, rain, golden light, geometric, desert dunes). Nothing to download, and they export fastest.
+   - **Free clips:** search free nature videos on Wikimedia Commons, no account needed. The page shows the credit line to paste into your caption.
+   - **Pexels:** high-quality portrait clips. Needs a free API key from https://www.pexels.com/api/, which is saved only in your browser.
+   - **Upload:** use your own video.
 3. **Text:** turn the English translation, the surah name and the reciter name on or off, and add your @handle.
 4. **Export:** press **Create MP4**, then **Download video**. Post it as a Reel.
 
@@ -46,5 +47,6 @@ Then open http://localhost:8000.
 | `js/timeline.js` | Joins the ayah audio and builds the on-screen timing (extend here for word-by-word) |
 | `js/renderer.js` | Draws one frame: background, overlay, text layout and paging, header and footer |
 | `js/exporter.js` | WebCodecs H.264/AAC → MP4, with a MediaRecorder fallback |
-| `js/backgrounds.js` | Clip upload and Pexels search |
+| `js/generated.js` | Animated backgrounds drawn in code |
+| `js/backgrounds.js` | Clip upload, Wikimedia Commons and Pexels search |
 | `js/app.js` | UI wiring, preview playback |

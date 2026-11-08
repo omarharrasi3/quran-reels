@@ -28,6 +28,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   margin: 0;
   background: var(--bg);
@@ -104,6 +105,20 @@ details[open] { display: grid; gap: 10px; }
 .status.error { color: var(--danger); }
 progress { width: 100%; accent-color: var(--accent); }
 
+.tabs { display: flex; gap: 4px; padding: 4px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; }
+.tabs button { flex: 1; padding: 8px 6px; border: 0; background: transparent; font-size: 13px; border-radius: 8px; color: var(--muted); }
+.tabs button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
+.tabpanel { display: grid; gap: 10px; }
+.tabpanel[hidden] { display: none; }
+.grid.styles { grid-template-columns: repeat(4, 1fr); }
+.grid button.selected { outline: 3px solid var(--accent); outline-offset: 1px; }
+.grid canvas { width: 100%; height: 100%; display: block; }
+.grid .label {
+  position: absolute; left: 0; right: 0; bottom: 0; top: auto;
+  padding: 14px 4px 5px; font-size: 11px; font-weight: 600; text-align: center;
+  background: linear-gradient(transparent, rgba(0,0,0,0.75)); color: #fff; border-radius: 0;
+}
+.credit { font-size: 12px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chips button { padding: 5px 10px; font-size: 12px; font-weight: 500; border-radius: 999px; }
 .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }

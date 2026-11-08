@@ -36,15 +36,30 @@
 
       <div class="card">
         <h2><span class="step">2</span> Background</h2>
-        <div class="row">
-          <label class="file-btn">Upload clip
-            <input id="upload" type="file" accept="video/*" hidden />
-          </label>
-          <button id="clearBg" class="ghost">Use plain gradient</button>
+        <div class="tabs" role="tablist">
+          <button role="tab" data-tab="animated" aria-selected="true">Animated</button>
+          <button role="tab" data-tab="free">Free clips</button>
+          <button role="tab" data-tab="pexels">Pexels</button>
+          <button role="tab" data-tab="upload">Upload</button>
         </div>
-        <details id="pexelsBox">
-          <summary>Search free nature clips (Pexels)</summary>
-          <p class="hint">Get a free API key at <a href="https://www.pexels.com/api/" target="_blank" rel="noopener">pexels.com/api</a>. It is saved only in this browser.</p>
+
+        <div class="tabpanel" data-panel="animated">
+          <p class="hint">Made by the page itself, so no download is needed. They work for any length and export fastest.</p>
+          <div class="grid styles" id="styleGrid"></div>
+        </div>
+
+        <div class="tabpanel" data-panel="free" hidden>
+          <p class="hint">Free nature videos from Wikimedia Commons. No account needed.</p>
+          <div class="row">
+            <input id="freeQuery" type="search" placeholder="e.g. clouds, ocean, forest" value="clouds timelapse" />
+            <button id="freeSearch">Search</button>
+          </div>
+          <div class="chips" id="freeChips"></div>
+          <div class="grid" id="freeResults"></div>
+        </div>
+
+        <div class="tabpanel" data-panel="pexels" hidden>
+          <p class="hint">High-quality portrait clips. Needs a free API key from <a href="https://www.pexels.com/api/" target="_blank" rel="noopener">pexels.com/api</a>, which is saved only in this browser.</p>
           <label>Pexels API key <input id="pexelsKey" type="password" autocomplete="off" placeholder="Paste your key" /></label>
           <div class="row">
             <input id="pexelsQuery" type="search" placeholder="e.g. clouds, ocean, forest" value="clouds sky" />
@@ -52,8 +67,20 @@
           </div>
           <div class="chips" id="chips"></div>
           <div class="grid" id="pexelsResults"></div>
-        </details>
+        </div>
+
+        <div class="tabpanel" data-panel="upload" hidden>
+          <p class="hint">Use your own video from your computer or phone.</p>
+          <div class="row">
+            <label class="file-btn">Choose a video
+              <input id="upload" type="file" accept="video/*" hidden />
+            </label>
+            <button id="clearBg" class="ghost">Use plain gradient</button>
+          </div>
+        </div>
+
         <p id="bgStatus" class="status"></p>
+        <p id="bgCredit" class="hint credit" hidden></p>
         <label>Darken background <input id="overlay" type="range" min="0" max="0.85" step="0.05" value="0.45" /></label>
       </div>
 
@@ -89,7 +116,7 @@
     </section>
   </main>
 
-  <footer class="foot">Text: Tanzil (Uthmani) & Sahih International via alquran.cloud · Audio: everyayah.com · Clips: Pexels</footer>
+  <footer class="foot">Text: Tanzil (Uthmani) & Sahih International via alquran.cloud · Audio: everyayah.com · Clips: Wikimedia Commons & Pexels</footer>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>

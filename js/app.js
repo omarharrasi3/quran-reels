@@ -2,14 +2,17 @@ import { RECITERS, getSurahs } from './quran-api.js';
 import { buildReel, SAMPLE_RATE } from './timeline.js';
 import { drawFrame } from './renderer.js';
 import { webCodecsSupport, exportWebCodecs, exportRealtime } from './exporter.js';
-import { getPexelsKey, setPexelsKey, searchPexels, loadPexelsVideo, videoFromBlob } from './backgrounds.js';
+import {
+  getPexelsKey, setPexelsKey, searchPexels, loadPexelsVideo, videoFromBlob, searchCommons, loadVideoUrl,
+} from './backgrounds.js';
+import { STYLES, getStyle, thumbnail } from './generated.js';
 
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries(
   ['surah', 'from', 'to', 'reciter', 'basmala', 'load', 'loadStatus', 'upload', 'clearBg', 'pexelsKey', 'pexelsQuery',
    'pexelsSearch', 'pexelsResults', 'chips', 'bgStatus', 'overlay', 'showTranslation', 'showHeader', 'showReciter',
    'handle', 'arScale', 'export', 'cancel', 'progress', 'exportStatus', 'download', 'canvas', 'play', 'seek', 'time',
-   'durationNote'].map((id) => [id, $(id)])
+   'durationNote', 'styleGrid', 'freeQuery', 'freeSearch', 'freeChips', 'freeResults', 'bgCredit'].map((id) => [id, $(id)])
 );
 const ctx = els.canvas.getContext('2d');
 
@@ -18,6 +21,7 @@ const state = {
   reel: null,
   meta: null, // { surahNameAr, surahNameEn, reciterName, slug }
   video: null,
+  bgStyle: getStyle('night'), // animated background; null when a video/gradient is used
   playing: false,
   audioCtx: null,
   source: null,
@@ -34,7 +38,8 @@ const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(
 
 function renderOpts() {
   return {
-    video: state.video,
+    video: state.bgStyle ? null : state.video,
+    bgStyle: state.bgStyle,
     overlay: Number(els.overlay.value),
     showTranslation: els.showTranslation.checked,
     showHeader: els.showHeader.checked,
@@ -165,7 +170,7 @@ function play() {
   state.source = src;
   state.startedAt = state.audioCtx.currentTime - state.pausedAt;
   state.playing = true;
-  if (state.video) {
+  if (state.video && !state.bgStyle) {
     state.video.currentTime = state.pausedAt % (state.video.duration || 1);
     state.video.play().catch(() => {});
   }
@@ -209,10 +214,106 @@ function loop() {
 fontsReady.then(() => requestAnimationFrame(loop));
 
 // ---------- backgrounds
-async function useVideo(v) {
+document.querySelectorAll('.tabs [role=tab]').forEach((tab) => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tabs [role=tab]').forEach((t) => t.setAttribute('aria-selected', String(t === tab)));
+    document.querySelectorAll('.tabpanel').forEach((p) => (p.hidden = p.dataset.panel !== tab.dataset.tab));
+    if (tab.dataset.tab === 'free' && !els.freeResults.children.length) doFreeSearch();
+  };
+});
+
+function markSelected(btn) {
+  document.querySelectorAll('.grid button.selected').forEach((b) => b.classList.remove('selected'));
+  if (btn) btn.classList.add('selected');
+}
+
+function setCredit(text) {
+  els.bgCredit.hidden = !text;
+  els.bgCredit.textContent = text || '';
+}
+
+function useStyle(style, btn) {
+  if (state.video) state.video.pause();
+  state.bgStyle = style;
+  els.overlay.value = style.overlay;
+  markSelected(btn);
+  setCredit('');
+  setStatus(els.bgStatus, `Using the “${style.name}” animated background.`);
+}
+
+STYLES.forEach((style) => {
+  const b = document.createElement('button');
+  b.title = style.name;
+  b.append(thumbnail(style));
+  const label = document.createElement('div');
+  label.className = 'label';
+  label.textContent = style.name;
+  b.append(label);
+  b.onclick = () => useStyle(style, b);
+  if (style === state.bgStyle) b.classList.add('selected');
+  els.styleGrid.append(b);
+});
+els.overlay.value = state.bgStyle.overlay;
+
+async function useVideo(v, btn) {
   if (state.video) { state.video.pause(); URL.revokeObjectURL(state.video.src); }
   state.video = v;
-  if (state.playing) v.play().catch(() => {});
+  state.bgStyle = null;
+  els.overlay.value = 0.45;
+  markSelected(btn);
+  if (state.playing) {
+    v.currentTime = currentTime() % (v.duration || 1);
+    v.play().catch(() => {});
+  }
+}
+
+function resultButton(it, badge) {
+  const b = document.createElement('button');
+  const img = document.createElement('img');
+  img.loading = 'lazy';
+  img.alt = '';
+  img.src = it.thumb;
+  const span = document.createElement('span');
+  span.textContent = badge;
+  b.append(img, span);
+  return b;
+}
+
+['clouds timelapse', 'ocean waves', 'forest', 'waterfall', 'rain', 'mountains', 'sunset', 'stars night', 'desert', 'river'].forEach((q) => {
+  const b = document.createElement('button');
+  b.textContent = q;
+  b.onclick = () => { els.freeQuery.value = q; doFreeSearch(); };
+  els.freeChips.append(b);
+});
+els.freeSearch.onclick = () => doFreeSearch();
+els.freeQuery.onkeydown = (e) => { if (e.key === 'Enter') doFreeSearch(); };
+
+async function doFreeSearch() {
+  setStatus(els.bgStatus, 'Searching free clips…');
+  els.freeResults.innerHTML = '';
+  try {
+    const items = await searchCommons(els.freeQuery.value.trim() || 'nature');
+    if (!items.length) { setStatus(els.bgStatus, 'No clips found. Try another word, like “clouds” or “sea”.'); return; }
+    setStatus(els.bgStatus, 'Tap a clip to use it. HD clips look best.');
+    for (const it of items) {
+      const b = resultButton(it, `${it.hd ? 'HD · ' : ''}${it.duration}s`);
+      b.title = `${it.title}, by ${it.author} (${it.license})`;
+      b.onclick = async () => {
+        setStatus(els.bgStatus, 'Downloading clip…');
+        try {
+          const v = await loadVideoUrl(it.file.src, (p) => setStatus(els.bgStatus, `Downloading clip… ${Math.round(p * 100)}%`));
+          await useVideo(v, b);
+          setStatus(els.bgStatus, `Using “${it.title}”.`);
+          setCredit(`Background: “${it.title}” by ${it.author}, ${it.license}, via Wikimedia Commons. Please add this credit to your Instagram caption.`);
+        } catch (e) {
+          setStatus(els.bgStatus, e.message, true);
+        }
+      };
+      els.freeResults.append(b);
+    }
+  } catch (e) {
+    setStatus(els.bgStatus, `Couldn't search right now: ${e.message}`, true);
+  }
 }
 
 els.upload.onchange = async () => {
@@ -221,6 +322,7 @@ els.upload.onchange = async () => {
   setStatus(els.bgStatus, 'Loading clip…');
   try {
     await useVideo(await videoFromBlob(f));
+    setCredit('');
     setStatus(els.bgStatus, `Using “${f.name}”.`);
   } catch (e) {
     setStatus(els.bgStatus, e.message, true);
@@ -230,6 +332,10 @@ els.upload.onchange = async () => {
 els.clearBg.onclick = () => {
   if (state.video) { state.video.pause(); URL.revokeObjectURL(state.video.src); }
   state.video = null;
+  state.bgStyle = null;
+  els.overlay.value = 0.2;
+  markSelected(null);
+  setCredit('');
   setStatus(els.bgStatus, 'Using the plain gradient.');
 };
 
@@ -248,14 +354,14 @@ async function doPexelsSearch() {
     if (!items.length) { setStatus(els.bgStatus, 'No clips found. Try another word.'); return; }
     setStatus(els.bgStatus, 'Tap a clip to use it.');
     for (const it of items) {
-      const b = document.createElement('button');
+      const b = resultButton(it, `${it.duration}s`);
       b.title = it.author ? `Video by ${it.author} on Pexels` : 'Pexels video';
-      b.innerHTML = `<img loading="lazy" alt="" src="${it.thumb}"><span>${it.duration}s</span>`;
       b.onclick = async () => {
         setStatus(els.bgStatus, 'Downloading clip…');
         try {
           const v = await loadPexelsVideo(it, (p) => setStatus(els.bgStatus, `Downloading clip… ${Math.round(p * 100)}%`));
-          await useVideo(v);
+          await useVideo(v, b);
+          setCredit(`Background video by ${it.author || 'a Pexels creator'} on Pexels (free to use, credit appreciated).`);
           setStatus(els.bgStatus, `Using a clip by ${it.author || 'a Pexels creator'} (Pexels).`);
         } catch (e) {
           setStatus(els.bgStatus, e.message, true);

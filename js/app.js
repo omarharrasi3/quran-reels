@@ -395,9 +395,10 @@ els.export.onclick = async () => {
       // keep the preview alive so people can see something is happening
       drawFrame(ctx, state.reel, p * state.reel.duration, opts);
     };
+    const maxBytes = document.getElementById('smallFile').checked ? 10e6 : undefined;
     const blob = fast
-      ? await exportWebCodecs(state.reel, opts, { onProgress, signal: abort.signal })
-      : await exportRealtime(state.reel, opts, { onProgress, signal: abort.signal });
+      ? await exportWebCodecs(state.reel, opts, { onProgress, signal: abort.signal, maxBytes })
+      : await exportRealtime(state.reel, opts, { onProgress, signal: abort.signal, maxBytes });
     const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
     if (els.download.href) URL.revokeObjectURL(els.download.href);
     els.download.href = URL.createObjectURL(blob);

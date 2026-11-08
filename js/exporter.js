@@ -74,9 +74,16 @@ class BackgroundDriver {
   }
 }
 
-export async function exportWebCodecs(reel, opts, { fps = 30, onProgress = () => {}, signal } = {}) {
+/** Video bitrate that keeps the whole file under maxBytes (with ~12% safety margin for container + VBR swings). */
+export function bitrateForSize(maxBytes, duration, audioBitrate = AAC.bitrate) {
+  const total = (maxBytes * 8 * 0.88) / Math.max(1, duration);
+  return Math.max(800_000, Math.min(10_000_000, Math.round(total - audioBitrate)));
+}
+
+export async function exportWebCodecs(reel, opts, { fps = 30, onProgress = () => {}, signal, maxBytes } = {}) {
   const support = await webCodecsSupport();
   if (!support) throw new Error('WebCodecs H.264/AAC encoding is not available in this browser.');
+  if (maxBytes) support.video.bitrate = bitrateForSize(maxBytes, reel.duration);
 
   const { Muxer, ArrayBufferTarget } = window.Mp4Muxer;
   const muxer = new Muxer({
@@ -158,7 +165,7 @@ export async function exportWebCodecs(reel, opts, { fps = 30, onProgress = () =>
 }
 
 /** Real-time fallback using MediaRecorder. Produces MP4 where supported, otherwise WebM. */
-export async function exportRealtime(reel, opts, { fps = 30, onProgress = () => {}, signal } = {}) {
+export async function exportRealtime(reel, opts, { fps = 30, onProgress = () => {}, signal, maxBytes } = {}) {
   const types = [
     'video/mp4;codecs=avc1.640028,mp4a.40.2',
     'video/mp4;codecs=avc1,mp4a',
@@ -180,7 +187,8 @@ export async function exportRealtime(reel, opts, { fps = 30, onProgress = () => 
   src.connect(dest);
 
   const stream = new MediaStream([...canvas.captureStream(fps).getVideoTracks(), ...dest.stream.getAudioTracks()]);
-  const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 10_000_000 });
+  const videoBitsPerSecond = maxBytes ? bitrateForSize(maxBytes, reel.duration) : 10_000_000;
+  const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond });
   const chunks = [];
   rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
   const stopped = new Promise((r) => (rec.onstop = r));

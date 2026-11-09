@@ -445,10 +445,11 @@ els.export.onclick = async () => {
   try {
     const fast = await webCodecsSupport();
     setStatus(els.exportStatus, fast ? 'Creating MP4…' : 'Recording in real time (your browser lacks fast export)…');
-    const onProgress = (p) => {
+    const onProgress = (p, frame) => {
       els.progress.value = p;
       // keep the preview alive so people can see something is happening
-      drawFrame(ctx, state.reel, p * state.reel.duration, opts);
+      if (frame) ctx.drawImage(frame, 0, 0);
+      else drawFrame(ctx, state.reel, p * state.reel.duration, opts);
     };
     const maxBytes = document.getElementById('smallFile').checked ? 10e6 : undefined;
     const blob = fast

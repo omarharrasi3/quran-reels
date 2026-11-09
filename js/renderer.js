@@ -111,11 +111,17 @@ function drawPhoto(ctx, img, t, duration) {
   ctx.drawImage(img, x, y, dw, dh);
 }
 
-function drawBackground(ctx, video, t, bgStyle, image, duration) {
+function drawBackground(ctx, video, t, bgStyle, image, duration, frame) {
   if (bgStyle) {
     bgStyle.draw(ctx, t, W, H);
   } else if (image) {
     drawPhoto(ctx, image, t, duration);
+  } else if (frame) {
+    // a decoded frame of the clip (export only)
+    const s = Math.max(W / frame.displayWidth, H / frame.displayHeight);
+    const dw = frame.displayWidth * s;
+    const dh = frame.displayHeight * s;
+    frame.draw(ctx, (W - dw) / 2, (H - dh) / 2, dw, dh);
   } else if (video && video.readyState >= 2 && video.videoWidth) {
     const s = Math.max(W / video.videoWidth, H / video.videoHeight);
     const dw = video.videoWidth * s;
@@ -135,37 +141,112 @@ function drawBackground(ctx, video, t, bgStyle, image, duration) {
   }
 }
 
+function newLayer() {
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  return c;
+}
+
+// Soft text shadows are the most expensive thing on the canvas, so text is drawn once per page
+// into a transparent layer and that finished layer is reused for every frame.
+function setupText(ctx) {
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur = 18;
+}
+
+let vignette = null;
+function vignetteLayer() {
+  if (vignette) return vignette;
+  vignette = newLayer();
+  const c = vignette.getContext('2d');
+  const g = c.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, H * 0.75);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(0,0,0,0.45)');
+  c.fillStyle = g;
+  c.fillRect(0, 0, W, H);
+  return vignette;
+}
+
+// Surah name at the top, reciter and handle at the bottom.
+const labels = { key: null, canvas: null };
+function labelLayer(opts) {
+  const key = [opts.showHeader, opts.surahNameAr, opts.surahNameEn, opts.reciterName, opts.handle].join('|');
+  if (labels.key === key) return labels.canvas;
+  labels.key = key;
+  labels.canvas ||= newLayer();
+  const c = labels.canvas.getContext('2d');
+  c.clearRect(0, 0, W, H);
+  setupText(c);
+  if (opts.showHeader) {
+    c.fillStyle = 'rgba(255,255,255,0.95)';
+    c.direction = 'rtl';
+    c.font = `64px ${AR_FONT}`;
+    c.fillText(opts.surahNameAr || '', W / 2, 220);
+    c.direction = 'ltr';
+    c.font = `500 30px ${EN_FONT}`;
+    c.fillStyle = 'rgba(255,255,255,0.75)';
+    c.fillText(opts.surahNameEn || '', W / 2, 300);
+  }
+  c.direction = 'ltr';
+  c.fillStyle = 'rgba(255,255,255,0.7)';
+  c.font = `500 28px ${EN_FONT}`;
+  if (opts.reciterName) c.fillText(opts.reciterName, W / 2, 1580);
+  if (opts.handle) {
+    c.font = `600 30px ${EN_FONT}`;
+    c.fillText(opts.handle, W / 2, 1630);
+  }
+  return labels.canvas;
+}
+
+// The verse currently on screen. Only one is kept: pages change every few seconds.
+const verse = { page: null, canvas: null };
+function verseLayer(page) {
+  if (verse.page === page) return verse.canvas;
+  verse.page = page;
+  verse.canvas ||= newLayer();
+  const c = verse.canvas.getContext('2d');
+  c.clearRect(0, 0, W, H);
+  setupText(c);
+
+  const arLH = page.arSize * 1.85;
+  const enLH = page.enSize * 1.4;
+  const blockH = page.arLines.length * arLH + (page.enLines.length ? 60 + page.enLines.length * enLH : 0);
+  let y = TEXT_TOP + (TEXT_BOTTOM - TEXT_TOP - blockH) / 2 + arLH / 2;
+
+  c.fillStyle = '#ffffff';
+  c.direction = 'rtl';
+  c.font = `${page.arSize}px ${AR_FONT}`;
+  for (const line of page.arLines) {
+    c.fillText(line, W / 2, y);
+    y += arLH;
+  }
+  if (page.enLines.length) {
+    y += 60 - arLH / 2 + enLH / 2;
+    c.direction = 'ltr';
+    c.font = `${page.enSize}px ${EN_FONT}`;
+    c.fillStyle = 'rgba(255,255,255,0.88)';
+    for (const line of page.enLines) {
+      c.fillText(line, W / 2, y);
+      y += enLH;
+    }
+  }
+  return verse.canvas;
+}
+
 /**
  * opts: { video, bgStyle (from generated.js; wins over video), overlay (0..1), showTranslation, showHeader, surahNameAr, surahNameEn, reciterName, handle, arScale }
  */
 export function drawFrame(ctx, reel, t, opts) {
   ctx.save();
   ctx.clearRect(0, 0, W, H);
-  drawBackground(ctx, opts.video, t, opts.bgStyle, opts.image, reel ? reel.duration : 30);
+  drawBackground(ctx, opts.video, t, opts.bgStyle, opts.image, reel ? reel.duration : 30, opts.frame);
 
   ctx.fillStyle = `rgba(0,0,0,${opts.overlay})`;
   ctx.fillRect(0, 0, W, H);
-  const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, H * 0.75);
-  vg.addColorStop(0, 'rgba(0,0,0,0)');
-  vg.addColorStop(1, 'rgba(0,0,0,0.45)');
-  ctx.fillStyle = vg;
-  ctx.fillRect(0, 0, W, H);
-
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.shadowColor = 'rgba(0,0,0,0.6)';
-  ctx.shadowBlur = 18;
-
-  if (opts.showHeader) {
-    ctx.fillStyle = 'rgba(255,255,255,0.95)';
-    ctx.direction = 'rtl';
-    ctx.font = `64px ${AR_FONT}`;
-    ctx.fillText(opts.surahNameAr || '', W / 2, 220);
-    ctx.direction = 'ltr';
-    ctx.font = `500 30px ${EN_FONT}`;
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.fillText(opts.surahNameEn || '', W / 2, 300);
-  }
+  ctx.drawImage(vignetteLayer(), 0, 0);
 
   if (reel && reel.segments.length) {
     const seg = segmentAt(reel.segments, t);
@@ -174,39 +255,10 @@ export function drawFrame(ctx, reel, t, opts) {
     const alpha = Math.max(0, Math.min(1, (t - page.start) / FADE, (page.end - t) / FADE));
     const isFirst = page.start === 0;
     ctx.globalAlpha = isFirst ? Math.min(1, (page.end - t) / FADE) : alpha;
-
-    const arLH = page.arSize * 1.85;
-    const enLH = page.enSize * 1.4;
-    const blockH = page.arLines.length * arLH + (page.enLines.length ? 60 + page.enLines.length * enLH : 0);
-    let y = TEXT_TOP + (TEXT_BOTTOM - TEXT_TOP - blockH) / 2 + arLH / 2;
-
-    ctx.fillStyle = '#ffffff';
-    ctx.direction = 'rtl';
-    ctx.font = `${page.arSize}px ${AR_FONT}`;
-    for (const line of page.arLines) {
-      ctx.fillText(line, W / 2, y);
-      y += arLH;
-    }
-    if (page.enLines.length) {
-      y += 60 - arLH / 2 + enLH / 2;
-      ctx.direction = 'ltr';
-      ctx.font = `${page.enSize}px ${EN_FONT}`;
-      ctx.fillStyle = 'rgba(255,255,255,0.88)';
-      for (const line of page.enLines) {
-        ctx.fillText(line, W / 2, y);
-        y += enLH;
-      }
-    }
+    if (ctx.globalAlpha > 0) ctx.drawImage(verseLayer(page), 0, 0);
     ctx.globalAlpha = 1;
   }
 
-  ctx.direction = 'ltr';
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  ctx.font = `500 28px ${EN_FONT}`;
-  if (opts.reciterName) ctx.fillText(opts.reciterName, W / 2, 1580);
-  if (opts.handle) {
-    ctx.font = `600 30px ${EN_FONT}`;
-    ctx.fillText(opts.handle, W / 2, 1630);
-  }
+  ctx.drawImage(labelLayer(opts), 0, 0);
   ctx.restore();
 }

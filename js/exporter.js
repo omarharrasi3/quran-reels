@@ -5,6 +5,8 @@ import { drawFrame, W, H } from './renderer.js';
 import { SAMPLE_RATE } from './timeline.js';
 
 const VIDEO_CODECS = ['avc1.640028', 'avc1.4d0028', 'avc1.42e028'];
+const MEDIABUNNY = 'https://cdn.jsdelivr.net/npm/mediabunny@1.61.6/dist/bundles/mediabunny.min.mjs';
+const MAX_QUEUE = 8; // frames waiting for the encoder
 const AAC = { codec: 'mp4a.40.2', sampleRate: SAMPLE_RATE, numberOfChannels: 2, bitrate: 160_000 };
 
 export async function webCodecsSupport() {
@@ -34,6 +36,24 @@ function seek(video, time) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Browsers slow timers to about once a second in a tab you're not looking at. Message events and the
+// encoder's own "dequeue" event aren't slowed, so the export keeps its speed if you switch tabs.
+function nextTask() {
+  return new Promise((resolve) => {
+    const { port1, port2 } = new MessageChannel();
+    port1.onmessage = () => { port1.close(); resolve(); };
+    port2.postMessage(0);
+  });
+}
+
+function encoderHasRoom(encoder) {
+  return new Promise((resolve) => {
+    const done = () => { encoder.removeEventListener('dequeue', done); clearTimeout(backstop); resolve(); };
+    const backstop = setTimeout(done, 100); // browsers without the dequeue event, or a failed encoder
+    encoder.addEventListener('dequeue', done);
+  });
+}
+
 /**
  * Keeps the background clip near a target time by *playing* it (fast) instead of seeking every frame
  * (seeking costs ~50 ms per frame). The drawn frame stays within ~0.1 s of the ideal one.
@@ -58,19 +78,71 @@ class BackgroundDriver {
       await v.play().catch(() => {});
     }
     this.last = target;
-    for (let guard = 0; guard < 500; guard++) {
+    const deadline = performance.now() + 2000;
+    while (performance.now() < deadline) {
       const cur = v.currentTime;
       if (cur > target + 0.1) { if (!v.paused) v.pause(); return; } // ahead: wait for the encoder
       if (cur >= target - 0.02 || v.ended) return;
       if (v.paused) await v.play().catch(() => {});
       if (target - cur > 1) { await seek(v, target); continue; } // far behind (slow decoder): jump
-      await sleep(4);
+      await (document.hidden ? nextTask() : sleep(2));
     }
   }
   async stop() {
     this.v.pause();
     this.v.playbackRate = 1;
     this.v.loop = true;
+  }
+}
+
+/**
+ * Reads the clip's frames straight from the file, as fast as the computer can decode them and with
+ * exact timing. Playing the clip (BackgroundDriver) can't go past about double speed without
+ * skipping frames, so it stays only as the fallback for files this can't read.
+ */
+class ClipFrames {
+  static async open(video) {
+    const { Input, ALL_FORMATS, BlobSource, VideoSampleSink } = await import(MEDIABUNNY);
+    const blob = await (await fetch(video.src)).blob();
+    const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(blob) });
+    const track = await input.getPrimaryVideoTrack();
+    if (!track || !(await track.canDecode())) return null;
+    return new ClipFrames(new VideoSampleSink(track));
+  }
+  constructor(sink) {
+    this.sink = sink;
+    this.current = null;
+    this.next = null;
+    this.iter = null;
+    this.last = Infinity;
+  }
+  async pull() {
+    const { value, done } = await this.iter.next();
+    return done ? null : value;
+  }
+  async restart() {
+    this.close();
+    this.iter = this.sink.samples();
+    this.current = await this.pull();
+    this.next = this.current ? await this.pull() : null;
+    if (!this.current) throw new Error('The clip has no readable frames.');
+  }
+  /** Moves `current` to the frame showing at time t (t only goes back when the clip loops). */
+  async seek(t) {
+    if (t < this.last) await this.restart();
+    this.last = t;
+    while (this.next && this.next.timestamp <= t) {
+      this.current.close();
+      this.current = this.next;
+      this.next = await this.pull();
+    }
+  }
+  close() {
+    this.current?.close();
+    this.next?.close();
+    this.current = this.next = null;
+    this.iter?.return();
+    this.iter = null;
   }
 }
 
@@ -131,24 +203,46 @@ export async function exportWebCodecs(reel, opts, { fps = 30, onProgress = () =>
   const ctx = canvas.getContext('2d');
   const video = opts.video;
   const wasPaused = video ? video.paused : true;
-  const bg = video && video.duration ? new BackgroundDriver(video) : null;
+  const hasClip = video && video.duration;
+  let clip = null;
+  if (hasClip) {
+    try { clip = await ClipFrames.open(video); } catch (e) { console.warn('Using the slower clip path:', e); }
+  }
+  let bg = hasClip && !clip ? new BackgroundDriver(video) : null;
   if (video) video.pause();
   if (bg) await bg.start();
 
   const total = Math.ceil(reel.duration * fps);
   const frameDur = 1e6 / fps;
+  let lastBreath = performance.now();
   try {
     for (let i = 0; i < total; i++) {
       if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
       if (encErr) throw encErr;
       const t = i / fps;
+      if (clip) {
+        try {
+          await clip.seek(t % video.duration);
+        } catch (e) {
+          console.warn('Switching to the slower clip path:', e);
+          clip.close();
+          clip = null;
+          bg = new BackgroundDriver(video);
+          await bg.start();
+        }
+      }
       if (bg) await bg.goto(t % video.duration);
-      drawFrame(ctx, reel, t, opts);
+      drawFrame(ctx, reel, t, clip ? { ...opts, video: null, frame: clip.current } : opts);
       const frame = new VideoFrame(canvas, { timestamp: Math.round(i * frameDur), duration: Math.round(frameDur) });
       videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
       frame.close();
-      while (videoEncoder.encodeQueueSize > 6) await new Promise((r) => setTimeout(r, 2));
-      if (i % 5 === 0) onProgress(i / total);
+      while (videoEncoder.encodeQueueSize > MAX_QUEUE && !encErr) await encoderHasRoom(videoEncoder);
+      if (performance.now() - lastBreath > 250) {
+        // A few times a second: update the progress bar and let Cancel respond.
+        onProgress(i / total, canvas);
+        await nextTask();
+        lastBreath = performance.now();
+      }
     }
     await videoEncoder.flush();
     await audioEncoder.flush();
@@ -156,6 +250,7 @@ export async function exportWebCodecs(reel, opts, { fps = 30, onProgress = () =>
   } finally {
     if (videoEncoder.state !== 'closed') videoEncoder.close();
     if (audioEncoder.state !== 'closed') audioEncoder.close();
+    clip?.close();
     if (bg) await bg.stop();
     if (video && !wasPaused) video.play().catch(() => {});
   }

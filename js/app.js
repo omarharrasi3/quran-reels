@@ -1,4 +1,4 @@
-import { RECITERS, getSurahs } from './quran-api.js';
+import { RECITERS, TRANSLATIONS, getTranslation, getSurahs } from './quran-api.js';
 import { buildReel, SAMPLE_RATE } from './timeline.js';
 import { drawFrame } from './renderer.js';
 import { webCodecsSupport, exportWebCodecs, exportRealtime } from './exporter.js';
@@ -11,7 +11,7 @@ import { STYLES, getStyle, thumbnail } from './generated.js';
 const $ = (id) => document.getElementById(id);
 const els = Object.fromEntries(
   ['surah', 'from', 'to', 'reciter', 'basmala', 'load', 'loadStatus', 'upload', 'clearBg', 'pexelsKey', 'pexelsQuery',
-   'pexelsSearch', 'pexelsResults', 'chips', 'bgStatus', 'overlay', 'showTranslation', 'showHeader', 'showReciter',
+   'pexelsSearch', 'pexelsResults', 'chips', 'bgStatus', 'overlay', 'translation', 'showHeader', 'showReciter',
    'handle', 'arScale', 'export', 'cancel', 'progress', 'exportStatus', 'download', 'canvas', 'play', 'seek', 'time',
    'durationNote', 'styleGrid', 'freeQuery', 'freeSearch', 'freeChips', 'freeResults', 'bgCredit',
    'photoQuery', 'photoSearch', 'photoChips', 'photoResults'].map((id) => [id, $(id)])
@@ -45,7 +45,8 @@ function renderOpts() {
     image: state.bgStyle ? null : state.image,
     bgStyle: state.bgStyle,
     overlay: Number(els.overlay.value),
-    showTranslation: els.showTranslation.checked,
+    showTranslation: !!els.translation.value,
+    trScript: getTranslation(els.translation.value).script,
     showHeader: els.showHeader.checked,
     surahNameAr: state.meta?.surahNameAr,
     surahNameEn: state.meta?.surahNameEn,
@@ -56,7 +57,24 @@ function renderOpts() {
 }
 
 // ---------- setup
-RECITERS.forEach((r) => els.reciter.add(new Option(r.name, r.id)));
+function addGroups(select, items, groupOf, labelOf) {
+  const groups = new Map();
+  for (const it of items) {
+    const g = groupOf(it);
+    if (!g) { select.add(new Option(labelOf(it), it.id)); continue; }
+    if (!groups.has(g)) {
+      groups.set(g, document.createElement('optgroup'));
+      groups.get(g).label = g;
+      select.append(groups.get(g));
+    }
+    groups.get(g).append(new Option(labelOf(it), it.id));
+  }
+}
+addGroups(els.reciter, RECITERS, (r) => (r.warsh ? 'Warsh (ورش)' : 'Hafs (حفص)'), (r) => `${r.name} — ${r.nameAr}`);
+addGroups(els.translation, TRANSLATIONS, (t) => t.lang, (t) => (t.lang ? `${t.lang} · ${t.name}` : t.name));
+els.translation.value = 'en.sahih';
+// Changing the translation reloads the text of verses that are already loaded (the audio comes from the cache).
+els.translation.onchange = () => { if (state.reel && !els.load.disabled) els.load.click(); };
 ['clouds sky', 'ocean waves', 'forest', 'rain', 'mountains', 'stars night', 'desert', 'waterfall', 'sunset'].forEach((q) => {
   const b = document.createElement('button');
   b.textContent = q;
@@ -122,9 +140,11 @@ els.load.onclick = async () => {
   setStatus(els.loadStatus, 'Loading text and recitation…');
   try {
     await fontsReady;
+    const tr = getTranslation(els.translation.value);
+    if (tr.script === 'urdu') await document.fonts.load('44px "Noto Nastaliq Urdu"', 'اردو').catch(() => {});
     const reciter = RECITERS.find((r) => r.id === els.reciter.value);
     state.reel = await buildReel(
-      { surah: s.number, from, to, reciterId: reciter.id, withBasmala: els.basmala.checked && !els.basmala.disabled },
+      { surah: s.number, from, to, reciterId: reciter.id, withBasmala: els.basmala.checked && !els.basmala.disabled, translation: tr.id },
       (p) => setStatus(els.loadStatus, `Loading recitation… ${Math.round(p * 100)}%`)
     );
     state.meta = {

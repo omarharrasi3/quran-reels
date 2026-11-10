@@ -1,19 +1,27 @@
 // Builds the reel timeline: which text is on screen when, plus the joined audio track.
 // This is the single place to extend later (e.g. word-by-word timings).
 
-import { getVerses, fetchAyahAudio, BASMALA_AR, BASMALA_EN } from './quran-api.js';
+import { getVerses, fetchAyahAudio, getTranslation, BASMALA_AR, BASMALA_EN } from './quran-api.js';
 
 export const SAMPLE_RATE = 48000;
 
 /**
  * @returns {Promise<{segments: Array<{start,end,arabic,english,ayahNo}>, audio: AudioBuffer, duration: number}>}
  */
-export async function buildReel({ surah, from, to, reciterId, withBasmala }, onProgress = () => {}) {
-  const verses = await getVerses(surah, from, to);
+export async function buildReel({ surah, from, to, reciterId, withBasmala, translation = 'en.sahih' }, onProgress = () => {}) {
+  const tr = getTranslation(translation);
+  const [verses, basmalaTr] = await Promise.all([
+    getVerses(surah, from, to, tr.id),
+    // The basmala in the chosen language is Al-Fatiha 1:1 (a tafsir explains the whole surah there, so skip it).
+    withBasmala && tr.id && tr.id !== 'en.sahih' && !tr.tafsir
+      ? getVerses(1, 1, 1, tr.id).then((v) => v[0].english)
+      : null,
+  ]);
   const items = verses.map((v) => ({ ...v, audioRef: [surah, v.numberInSurah] }));
   if (withBasmala) {
     // Basmala recitation = Al-Fatiha 1:1 by the same reciter.
-    items.unshift({ numberInSurah: null, arabic: BASMALA_AR, english: BASMALA_EN, audioRef: [1, 1] });
+    const english = tr.id === 'en.sahih' ? BASMALA_EN : basmalaTr || '';
+    items.unshift({ numberInSurah: null, arabic: BASMALA_AR, english, audioRef: [1, 1] });
   }
 
   // Decode at a fixed sample rate so all clips can be concatenated and encoded directly.
@@ -47,10 +55,36 @@ export async function buildReel({ surah, from, to, reciterId, withBasmala }, onP
     offset += b.length;
   });
 
+  shareGroupedText(segments);
   return { segments, audio, duration: totalFrames / SAMPLE_RATE };
 }
 
 export function segmentAt(segments, t) {
   for (const s of segments) if (t >= s.start && t < s.end) return s;
   return segments[segments.length - 1];
+}
+
+/**
+ * A tafsir often explains several ayat in one passage, so the same text comes back for each of them.
+ * Instead of repeating it, spread its words over those ayat in proportion to how long each is recited.
+ */
+function shareGroupedText(segments) {
+  for (let i = 0; i < segments.length; ) {
+    let j = i + 1;
+    while (j < segments.length && segments[i].english && segments[j].english === segments[i].english) j++;
+    if (j - i > 1) {
+      const run = segments.slice(i, j);
+      const words = run[0].english.split(/\s+/);
+      const total = run.reduce((t, s) => t + (s.end - s.start), 0);
+      let used = 0;
+      let time = 0;
+      run.forEach((s, k) => {
+        time += s.end - s.start;
+        const upto = k === run.length - 1 ? words.length : Math.round((words.length * time) / total);
+        s.english = words.slice(used, Math.max(upto, used + 1)).join(' ');
+        used = Math.max(upto, used + 1);
+      });
+    }
+    i = j;
+  }
 }

@@ -31,23 +31,46 @@ function wrap(ctx, text, maxW) {
   return lines;
 }
 
+/** Splits arr into `parts` consecutive groups whose sizes differ by at most one. */
 function splitEvenly(arr, parts) {
   const out = [];
-  const per = Math.ceil(arr.length / parts);
-  for (let i = 0; i < parts; i++) out.push(arr.slice(i * per, (i + 1) * per));
+  let i = 0;
+  for (let k = 0; k < parts; k++) {
+    const size = Math.round((arr.length - i) / (parts - k));
+    out.push(arr.slice(i, i + size));
+    i += size;
+  }
   return out;
 }
 
-/** Fit a segment's text into the safe area; very long ayat are split into timed pages. */
+// How each script is drawn on the reel: font, direction, size multiplier and line spacing.
+const SCRIPTS = {
+  latin: { font: EN_FONT, dir: 'ltr', size: 1, lh: 1.4 },
+  arabic: { font: '"Amiri", serif', dir: 'rtl', size: 1.15, lh: 1.65 },
+  urdu: { font: '"Noto Nastaliq Urdu", "Amiri", serif', dir: 'rtl', size: 1.0, lh: 2.2 },
+};
+const scriptOf = (opts) => SCRIPTS[opts.trScript] || SCRIPTS.latin;
+
+/** Fit a segment's text into the safe area; long ayat (or long translations) are split into timed pages. */
 function layout(ctx, seg, opts) {
-  const key = `${opts.showTranslation}|${opts.arScale}`;
+  const sc = scriptOf(opts);
+  const showTr = opts.showTranslation && !!seg.english;
+  const key = `${showTr}|${opts.arScale}|${opts.trScript}`;
   const cached = layoutCache.get(seg);
   if (cached && cached.key === key) return cached.pages;
 
   const maxW = W - TEXT_X_MARGIN * 2;
   const areaH = TEXT_BOTTOM - TEXT_TOP;
-  const arText = seg.ayahNo ? `${seg.arabic} ۝${toArabicDigits(seg.ayahNo)}` : seg.arabic;
+  const arText = seg.ayahNo ? `${seg.arabic} ۝${toArabicDigits(seg.ayahNo)}` : seg.arabic;
   const scale = opts.arScale || 1;
+  const trSizeFor = (arSize) => Math.round(sc.size * Math.max(32, Math.min(44, Math.round(arSize * 0.46))));
+  const wrapTr = (text, trSize) => {
+    ctx.font = `${trSize}px ${sc.font}`;
+    ctx.direction = sc.dir;
+    return wrap(ctx, text, maxW);
+  };
+  const heightOf = (arLines, trLines, arSize, trSize) =>
+    arLines.length * arSize * 1.85 + (trLines.length ? 60 + trLines.length * trSize * sc.lh : 0);
   let fit = null;
 
   const minSize = Math.round(66 * scale);
@@ -55,11 +78,9 @@ function layout(ctx, seg, opts) {
     ctx.font = `${arSize}px ${AR_FONT}`;
     ctx.direction = 'rtl';
     const arLines = wrap(ctx, arText, maxW);
-    const enSize = Math.max(32, Math.min(44, Math.round(arSize * 0.46)));
-    ctx.font = `${enSize}px ${EN_FONT}`;
-    ctx.direction = 'ltr';
-    const enLines = opts.showTranslation ? wrap(ctx, seg.english, maxW) : [];
-    const h = arLines.length * arSize * 1.85 + (enLines.length ? 60 + enLines.length * enSize * 1.4 : 0);
+    const enSize = trSizeFor(arSize);
+    const enLines = showTr ? wrapTr(seg.english, enSize) : [];
+    const h = heightOf(arLines, enLines, arSize, enSize);
     fit = { arSize, enSize, arLines, enLines, h };
     if (h <= areaH) break;
   }
@@ -68,32 +89,40 @@ function layout(ctx, seg, opts) {
   if (fit.h <= areaH) {
     pages = [{ ...fit, start: seg.start, end: seg.end }];
   } else {
-    // Still too tall at the smallest size: split across pages, timed by Arabic character count.
+    // Still too tall at the smallest size: split across pages. Use the fewest pages where every page fits.
+    // When there are more pages than Arabic lines (a short ayah with a long tafsir), each page repeats the ayah.
     const maxPerPage = Math.max(1, Math.floor((areaH * 0.62) / (fit.arSize * 1.85)));
-    const nPages = Math.ceil(fit.arLines.length / maxPerPage);
-    const perPageAr = Math.ceil(fit.arLines.length / nPages); // balance lines across pages
-    const arPages = [];
-    for (let i = 0; i < fit.arLines.length; i += perPageAr) arPages.push(fit.arLines.slice(i, i + perPageAr));
-    const enWords = seg.english.split(/\s+/);
-    const enPages = splitEvenly(enWords, arPages.length);
-    ctx.font = `${fit.enSize}px ${EN_FONT}`;
-    ctx.direction = 'ltr';
-    const totalChars = arPages.reduce((s, p) => s + p.join(' ').length, 0);
+    const trWords = showTr ? seg.english.split(/\s+/) : [];
+    let n = Math.ceil(fit.arLines.length / maxPerPage);
+    let split;
+    for (; ; n++) {
+      const repeat = n > fit.arLines.length;
+      const arPages = repeat ? Array(n).fill(fit.arLines) : splitEvenly(fit.arLines, n);
+      const trPages = splitEvenly(trWords, n).map((w) => (w.length ? wrapTr(w.join(' '), fit.enSize) : []));
+      split = { repeat, arPages, trPages };
+      const fits = arPages.every((a, i) => heightOf(a, trPages[i], fit.arSize, fit.enSize) <= areaH);
+      if (fits || n >= 30 || (!showTr && !repeat && n >= fit.arLines.length)) break;
+    }
+    // Time each page by how much text it holds: the Arabic, or the translation when the ayah repeats.
+    const weights = split.arPages.map((a, i) =>
+      split.repeat ? split.trPages[i].join(' ').length || 1 : a.join(' ').length || 1);
+    const total = weights.reduce((x, y) => x + y, 0);
     let t = seg.start;
-    pages = arPages.map((arLines, i) => {
-      const dur = ((seg.end - seg.start) * arLines.join(' ').length) / totalChars;
+    pages = split.arPages.map((arLines, i) => {
+      const dur = ((seg.end - seg.start) * weights[i]) / total;
       const page = {
         arSize: fit.arSize,
         enSize: fit.enSize,
         arLines,
-        enLines: opts.showTranslation ? wrap(ctx, enPages[i].join(' '), maxW) : [],
+        enLines: split.trPages[i],
         start: t,
-        end: i === arPages.length - 1 ? seg.end : t + dur,
+        end: i === split.arPages.length - 1 ? seg.end : t + dur,
       };
       t += dur;
       return page;
     });
   }
+  pages.forEach((p) => { p.trFont = sc.font; p.trDir = sc.dir; p.trLH = sc.lh; });
   layoutCache.set(seg, { key, pages });
   return pages;
 }
@@ -212,7 +241,7 @@ function verseLayer(page) {
   setupText(c);
 
   const arLH = page.arSize * 1.85;
-  const enLH = page.enSize * 1.4;
+  const enLH = page.enSize * page.trLH;
   const blockH = page.arLines.length * arLH + (page.enLines.length ? 60 + page.enLines.length * enLH : 0);
   let y = TEXT_TOP + (TEXT_BOTTOM - TEXT_TOP - blockH) / 2 + arLH / 2;
 
@@ -225,8 +254,8 @@ function verseLayer(page) {
   }
   if (page.enLines.length) {
     y += 60 - arLH / 2 + enLH / 2;
-    c.direction = 'ltr';
-    c.font = `${page.enSize}px ${EN_FONT}`;
+    c.direction = page.trDir;
+    c.font = `${page.enSize}px ${page.trFont}`;
     c.fillStyle = 'rgba(255,255,255,0.88)';
     for (const line of page.enLines) {
       c.fillText(line, W / 2, y);
@@ -237,7 +266,7 @@ function verseLayer(page) {
 }
 
 /**
- * opts: { video, bgStyle (from generated.js; wins over video), overlay (0..1), showTranslation, showHeader, surahNameAr, surahNameEn, reciterName, handle, arScale }
+ * opts: { video, bgStyle (from generated.js; wins over video), overlay (0..1), showTranslation, trScript, showHeader, surahNameAr, surahNameEn, reciterName, handle, arScale }
  */
 export function drawFrame(ctx, reel, t, opts) {
   ctx.save();

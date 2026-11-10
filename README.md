@@ -18,7 +18,7 @@ Long ayat (e.g. Ayat al-Kursi) are split into timed pages automatically. Reels o
 
 ## Sources
 - Arabic text: Tanzil Uthmani, via api.alquran.cloud
-- Translation: Sahih International, via api.alquran.cloud
+- Translations (30+ languages, plus Arabic tafsir Al-Muyassar), via api.alquran.cloud
 - Recitation audio: everyayah.com (with the quranicaudio.com mirror as a fallback)
 - Fonts: Amiri Quran and Inter (Google Fonts)
 - MP4 writing: mp4-muxer
